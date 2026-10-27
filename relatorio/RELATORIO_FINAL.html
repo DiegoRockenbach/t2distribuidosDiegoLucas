@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Trabalho 2 — Sistemas Distribuídos</title>
+  <style>
+    @page { size: A4; margin: 15mm 14mm 15mm 16mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: #20252b;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 9.3pt;
+      line-height: 1.36;
+    }
+    h1, h2, h3 { color: #17395c; page-break-after: avoid; }
+    h1 { margin: 0 0 5px; font-size: 19pt; text-align: center; }
+    h2 {
+      margin: 15px 0 7px;
+      padding-bottom: 3px;
+      border-bottom: 1.5px solid #5d7f9f;
+      font-size: 13.3pt;
+    }
+    h3 { margin: 11px 0 4px; font-size: 10.8pt; }
+    p { margin: 4px 0 7px; text-align: justify; orphans: 3; widows: 3; }
+    ul { margin: 4px 0 9px 18px; padding: 0; }
+    li { margin: 2px 0; text-align: justify; }
+    code { font-family: Consolas, monospace; font-size: 8.8pt; }
+    .identity {
+      margin: 0 0 17px;
+      padding: 10px 12px;
+      border-top: 3px solid #17395c;
+      border-bottom: 1px solid #a8b7c5;
+      text-align: center;
+    }
+    .identity .institution { font-weight: 700; letter-spacing: .25px; }
+    .identity .course { margin-top: 2px; }
+    .identity .authors { margin-top: 7px; }
+    .lead {
+      margin: 10px 0 13px;
+      padding: 9px 11px;
+      background: #eef3f7;
+      border-left: 4px solid #315d83;
+    }
+    table { width: 100%; margin: 7px 0 11px; border-collapse: collapse; font-size: 8.5pt; break-inside: avoid; }
+    th, td { padding: 4px 5px; border: 1px solid #9facb8; vertical-align: top; }
+    th { color: #fff; background: #315d83; font-weight: 700; text-align: left; }
+    tbody tr:nth-child(even) { background: #f3f6f8; }
+    td.num, th.num { text-align: right; white-space: nowrap; }
+    td.center, th.center { text-align: center; }
+    .small { font-size: 8.3pt; color: #48545f; }
+    .callout {
+      margin: 9px 0;
+      padding: 8px 10px;
+      border: 1px solid #b9c6d1;
+      border-left: 4px solid #d27a28;
+      background: #fffaf3;
+      page-break-inside: avoid;
+    }
+    .sql {
+      margin: 7px 0 10px;
+      padding: 8px 10px;
+      color: #eaf2f8;
+      background: #23313e;
+      border-radius: 3px;
+      white-space: pre-wrap;
+      font-family: Consolas, monospace;
+      font-size: 8.6pt;
+    }
+    figure { margin: 11px auto 14px; page-break-inside: avoid; text-align: center; }
+    figure img { max-width: 100%; max-height: 178mm; }
+    figure img.diagram { width: 58%; }
+    figure img.wide { width: 94%; }
+    figcaption { margin-top: 4px; color: #4d5964; font-size: 8.2pt; }
+    .page-break { break-before: page; }
+    .avoid { page-break-inside: avoid; }
+    .conclusion { padding: 10px 12px; background: #eef3f7; border: 1px solid #aebdca; }
+  </style>
+</head>
+<body>
+  <h1>Trabalho 2 — Sistemas Distribuídos</h1>
+  <div class="identity">
+    <div class="institution">Universidade Federal de Santa Maria</div>
+    <div class="course">Tolerância a falhas com replicação</div>
+    <div class="authors"><strong>Autores:</strong> Lucas Aued e Diego Rockenbach</div>
+  </div>
+
+  <div class="lead">
+    A aplicação CRUD do Trabalho 1 recebeu replicação nas duas camadas que eram pontos únicos de falha: o servidor web passou a ter três réplicas atrás de um balanceador de carga, e o PostgreSQL passou a ter um primário e duas réplicas, com troca automática do primário. A solução foi avaliada derrubando servidores durante a carga de 100 clientes simultâneos do T1 e medindo o efeito na disponibilidade e no desempenho.
+  </div>
+
+  <h2>1. Solução desenvolvida</h2>
+
+  <p>A aplicação é a mesma do T1: medições de qualidade do ar, as mesmas rotas CRUD, o mesmo dataset de 50 mil registros e o índice composto escolhido no T1. No T1, a API e o banco eram processos únicos, e a queda de qualquer um deles interrompia o serviço inteiro. No T2, cada camada passou a ter réplicas:</p>
+
+  <table>
+    <thead><tr><th>Componente</th><th class="center">Réplicas</th><th>Tecnologia</th><th>Papel</th></tr></thead>
+    <tbody>
+      <tr><td>Balanceador</td><td class="center">1</td><td>HAProxy 3.2</td><td>Distribui as requisições entre as APIs e leva as conexões SQL ao primário ou às réplicas, verificando a saúde de cada servidor</td></tr>
+      <tr><td>Servidor web</td><td class="center">3</td><td>Node.js 22, Fastify 5, TypeScript</td><td>A mesma API do T1, sem estado</td></tr>
+      <tr><td>Banco de dados</td><td class="center">3</td><td>PostgreSQL 16 + Patroni 4.1</td><td>Um primário e duas réplicas; o Patroni promove uma réplica quando o primário cai</td></tr>
+      <tr><td>Coordenação</td><td class="center">3</td><td>etcd 3.5</td><td>Guarda qual nó é o primário; as decisões são tomadas por consenso (Raft)</td></tr>
+      <tr><td>Clientes simulados</td><td class="center">—</td><td>Apache JMeter 5.6.3</td><td>O mesmo plano de carga do T1</td></tr>
+    </tbody>
+  </table>
+
+  <p>A API também foi alterada para atravessar uma troca de primário:</p>
+  <ul>
+    <li><strong>Novas tentativas:</strong> falhas transitórias do banco (conexão recusada ou perdida, servidor reiniciando) são repetidas por até 2,5 s; depois disso a API responde <code>503</code>.</li>
+    <li><strong>Leituras com rota alternativa:</strong> se o primário não responde, a consulta vai para as réplicas.</li>
+    <li><strong>Criação idempotente:</strong> cada <code>POST</code> envia o cabeçalho <code>Idempotency-Key</code>; se for repetido após uma falha, a API devolve o registro já criado em vez de duplicá-lo.</li>
+  </ul>
+
+  <div class="callout"><strong>Defeito encontrado no código do T1.</strong> O pool de conexões não tratava o erro emitido quando o PostgreSQL cai. No primeiro ensaio de queda do banco, as três APIs morreram no mesmo instante: no T1, a queda do banco derrubaria também o servidor web. Como as réplicas executam o mesmo código, a replicação sozinha não evitou a falha; foi preciso corrigir o tratamento de erros.</div>
+
+  <h2>2. Arquitetura da solução</h2>
+
+  <p>Os clientes acessam somente o HAProxy. Ele verifica cada API a cada segundo e observa o tráfego: uma API que deixa de aceitar conexões sai do balanceamento, e as requisições que estavam com ela são reenviadas a outra réplica. No banco, o HAProxy consulta o Patroni de cada nó a cada 0,5 s, e a porta 5000 sempre leva ao primário atual. O primário renova a cada 2 s uma chave de líder no etcd, válida por 20 s; se ele morre, a chave expira, a réplica mais atualizada é promovida e a outra passa a segui-la. Quando o nó antigo volta, é reintegrado como réplica.</p>
+
+  <figure>
+    <img class="diagram" src="figuras/arquitetura.svg" alt="Arquitetura replicada">
+    <figcaption>Figura 1 — Caminho das requisições. Qualquer um dos três nós do banco pode ser o primário; quem decide é o Patroni.</figcaption>
+  </figure>
+
+
+  <h2>3. Preparação dos experimentos</h2>
+
+  <h3>3.1 Configurações comparadas</h3>
+  <table>
+    <thead><tr><th>Configuração</th><th>Topologia</th><th>Replicação do banco</th><th>Leituras</th></tr></thead>
+    <tbody>
+      <tr><td>Sem replicação (T1)</td><td>1 API + 1 PostgreSQL</td><td>—</td><td>No único banco</td></tr>
+      <tr><td>Replicação assíncrona</td><td>3 APIs + 3 PostgreSQL</td><td>O primário confirma o commit sem esperar as réplicas</td><td>No primário</td></tr>
+      <tr><td>Replicação síncrona</td><td>3 APIs + 3 PostgreSQL</td><td>O primário espera uma réplica gravar o log antes de confirmar</td><td>No primário</td></tr>
+      <tr><td>Assíncrona + leitura nas réplicas</td><td>3 APIs + 3 PostgreSQL</td><td>Assíncrona</td><td>Nas réplicas</td></tr>
+    </tbody>
+  </table>
+
+  <p>O total de conexões com o primário foi o mesmo nas duas topologias: 15 (uma API com pool de 15 no T1; três APIs com pool de 5 no T2). Antes de cada rodada, a tabela era recriada com os 50.000 registros e o índice composto do T1.</p>
+
+  <h3>3.2 Falhas provocadas</h3>
+  <p>Durante a carga do cenário A (50 leitores e 50 escritores), um servidor foi derrubado com <code>docker kill</code> aos 50 s — queda abrupta, sem desligamento ordenado — e religado 60 s depois, em rodadas de 150 s.</p>
+
+  <table>
+    <thead><tr><th>Falha</th><th>O que foi feito</th><th>Configurações</th></tr></thead>
+    <tbody>
+      <tr><td>Queda do servidor web</td><td>Derrubar uma das três APIs (no T1, a única)</td><td>Sem replicação, assíncrona</td></tr>
+      <tr><td>Queda do primário do banco</td><td>Derrubar o primário atual (no T1, o único banco)</td><td>Sem replicação, assíncrona, síncrona</td></tr>
+      <tr><td>Queda de uma réplica do banco</td><td>Derrubar uma réplica (no modo síncrono, a réplica síncrona)</td><td>Assíncrona, síncrona, assíncrona + leitura nas réplicas</td></tr>
+      <tr><td>Troca planejada do primário</td><td>Pedir ao Patroni que passe a liderança a uma réplica, sem derrubar nada</td><td>Assíncrona, síncrona</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout"><strong>Espera após erro.</strong> O plano do JMeter ganhou uma espera de 100 ms após cada resposta com erro. Sem ela, com a API fora do ar, cada cliente repetiria a requisição milhares de vezes por segundo. A espera não afeta as rodadas sem erros.</div>
+
+  <h3>3.3 Matriz e ambiente de execução</h3>
+  <p>Foram realizadas <strong>36 rodadas sem falha</strong> (4 configurações × 3 cenários × 3 repetições, 60 s cada, descartando os 10 s de ramp-up) e <strong>30 rodadas com falha</strong> (10 combinações × 3 repetições). As repetições foram intercaladas entre as configurações. No total, o JMeter registrou <strong>8.993.625 requisições</strong>.</p>
+
+  <table>
+    <thead><tr><th>Item</th><th>Configuração observada</th></tr></thead>
+    <tbody>
+      <tr><td>Máquina</td><td>Windows 11 Home; Intel Core i7-11800H; 8 núcleos e 16 processadores lógicos; aproximadamente 15,8 GiB de RAM</td></tr>
+      <tr><td>Docker Desktop</td><td>16 CPUs lógicas e aproximadamente 7,6 GiB disponíveis</td></tr>
+      <tr><td>Banco</td><td>PostgreSQL 16.14, Patroni 4.1.5 e etcd 3.5.34</td></tr>
+      <tr><td>Balanceador</td><td>HAProxy 3.2.22</td></tr>
+      <tr><td>Ferramenta de carga</td><td>Apache JMeter 5.6.3 sobre Java 24</td></tr>
+      <tr><td>Métricas</td><td>Vazão, percentil 95, erros e maior intervalo sem nenhuma resposta correta após a falha</td></tr>
+    </tbody>
+  </table>
+
+  <h2>4. O que acontece quando um servidor falha (pergunta a)</h2>
+
+  <p>A tabela reúne as médias das três repetições de cada falha. O <strong>intervalo sem leitura</strong> (ou sem escrita) é o maior tempo, depois da queda, em que nenhum cliente conseguiu uma leitura (ou escrita) bem-sucedida.</p>
+
+  <table>
+    <thead>
+      <tr><th>Falha</th><th>Configuração</th><th class="num">Erros de<br>leitura</th><th class="num">Erros de<br>escrita</th><th class="num">Sem leitura<br>(s)</th><th class="num">Sem escrita<br>(s)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Queda do servidor web</td><td>Sem replicação (T1)</td><td class="num">28.225</td><td class="num">28.205</td><td class="num">61,2</td><td class="num">61,2</td></tr>
+      <tr><td>Queda do servidor web</td><td>Assíncrona</td><td class="num">0</td><td class="num">0</td><td class="num">0,1</td><td class="num">0,1</td></tr>
+      <tr><td>Queda do primário do banco</td><td>Sem replicação (T1)</td><td class="num">983</td><td class="num">983</td><td class="num">61,6</td><td class="num">61,6</td></tr>
+      <tr><td>Queda do primário do banco</td><td>Assíncrona</td><td class="num">0</td><td class="num">445</td><td class="num">0,9</td><td class="num">21,5</td></tr>
+      <tr><td>Queda do primário do banco</td><td>Síncrona</td><td class="num">0</td><td class="num">465</td><td class="num">0,8</td><td class="num">22,2</td></tr>
+      <tr><td>Queda de uma réplica do banco</td><td>Assíncrona</td><td class="num">0</td><td class="num">0</td><td class="num">0,1</td><td class="num">0,2</td></tr>
+      <tr><td>Queda de uma réplica do banco</td><td>Síncrona</td><td class="num">0</td><td class="num">0</td><td class="num">1,6</td><td class="num">1,7</td></tr>
+      <tr><td>Queda de uma réplica do banco</td><td>Assíncrona + leitura nas réplicas</td><td class="num">0</td><td class="num">0</td><td class="num">0,2</td><td class="num">0,3</td></tr>
+      <tr><td>Troca planejada do primário</td><td>Assíncrona</td><td class="num">0</td><td class="num">10</td><td class="num">0,5</td><td class="num">1,9</td></tr>
+      <tr><td>Troca planejada do primário</td><td>Síncrona</td><td class="num">0</td><td class="num">6</td><td class="num">0,5</td><td class="num">1,9</td></tr>
+    </tbody>
+  </table>
+
+  <p>No T1, o número de erros depende da espera de 100 ms após cada erro; na queda do banco ele é menor porque cada requisição aguarda os 2,5 s de novas tentativas da API antes de receber <code>503</code>.</p>
+
+
+  <h3>4.1 Comportamento em cada falha</h3>
+  <ul>
+    <li><strong>Servidor web, sem replicação:</strong> a única API caiu e nenhuma requisição foi atendida durante os 61,2 s até o processo voltar.</li>
+    <li><strong>Servidor web, com replicação:</strong> o HAProxy retirou a API derrubada do balanceamento em 0,5 s e reenviou a outra réplica as requisições que estavam com ela (61 por rodada, em média). Nenhum cliente recebeu erro nas três repetições, e a vazão não caiu: duas APIs deram conta da carga.</li>
+    <li><strong>Banco, sem replicação:</strong> a API continuou no ar, mas respondeu <code>503</code> a todas as requisições até o PostgreSQL ser religado.</li>
+    <li><strong>Primário do banco, com replicação:</strong> nenhuma leitura falhou: o HAProxy tirou o primário de circulação em cerca de 1 s e as consultas passaram para as réplicas. As escritas receberam <code>503</code> por cerca de 22 s, até a chave de líder expirar e uma réplica ser promovida, e depois voltaram sozinhas. O nó derrubado, ao ser religado, voltou como réplica cerca de 30 s depois. Os modos assíncrono e síncrono se comportaram igual, porque a detecção é a mesma.</li>
+    <li><strong>Réplica do banco:</strong> no modo assíncrono, a queda passou despercebida, inclusive com as leituras indo para as réplicas. No síncrono, a réplica derrubada era a que confirmava os commits: as escritas pararam por até 2,3 s, até o Patroni escolher a outra réplica como síncrona, e as leituras também, porque as escritas bloqueadas ocupavam as conexões do pool. Nenhuma requisição falhou.</li>
+    <li><strong>Troca planejada:</strong> o primário entrega a liderança sem esperar a chave expirar: 1,9 s sem escrita, contra cerca de 22 s numa queda, e no máximo 30 erros por rodada. É assim que se faria manutenção no banco.</li>
+  </ul>
+
+  <figure>
+    <img class="wide" src="figuras/linha_do_tempo_falhas.png" alt="Linha do tempo das falhas">
+    <figcaption>Figura 2 — Respostas corretas e erros por segundo em torno da falha. À esquerda, a topologia do T1; à direita, a replicada.</figcaption>
+  </figure>
+
+  <div class="callout"><strong>Por que as escritas ficam cerca de 20 s paradas.</strong> O Patroni só promove uma réplica quando a chave de líder do primário expira no etcd, para não haver dois primários se o primário estiver apenas lento, e não morto. O prazo de 20 s é o menor aceito pelo Patroni 4.1; a eleição e a promoção em si levaram de 0,5 a 2,5 s. Um prazo menor reduziria a indisponibilidade, mas aumentaria o risco de trocas desnecessárias de primário.</div>
+
+  <h2>5. Réplicas e protocolo de atualização (pergunta b)</h2>
+
+  <h3>5.1 Quantas réplicas</h3>
+  <table>
+    <thead><tr><th>Componente</th><th class="center">Réplicas</th><th>Justificativa</th></tr></thead>
+    <tbody>
+      <tr><td>API</td><td class="center">3</td><td>Tolera a queda de uma e mantém duas, que sustentaram a carga inteira (Seção 4). Com duas, uma queda deixaria o sistema sem redundância até a réplica voltar.</td></tr>
+      <tr><td>PostgreSQL</td><td class="center">3 (1 + 2)</td><td>Com uma réplica só, a queda dela no modo síncrono obrigaria a escolher entre bloquear as escritas e abrir mão de não perder dados. Com duas, o papel de síncrona passa para a outra, e após um failover ainda resta uma réplica.</td></tr>
+      <tr><td>etcd</td><td class="center">3</td><td>O consenso exige maioria: com 3 membros, 2 decidem e 1 pode falhar. Para tolerar <em>f</em> falhas são necessários 2<em>f</em> + 1 membros; 4 membros também tolerariam só 1.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>5.2 Como as réplicas são atualizadas</h3>
+  <p>O banco usa replicação <strong>primário-backup</strong> (passiva) com envio de log: só o primário executa escritas; cada alteração é gravada no WAL (<em>write-ahead log</em>), que é transmitido continuamente às réplicas e reaplicado por elas na mesma ordem. As réplicas são cópias exatas do primário, inclusive do índice, e não aceitam escritas. O que muda entre os modos é quando o cliente recebe a confirmação:</p>
+
+  <table>
+    <thead><tr><th>Modo</th><th>O commit é confirmado depois de</th><th>Perda possível quando o primário cai</th></tr></thead>
+    <tbody>
+      <tr><td>Assíncrono</td><td>Gravar o WAL no disco do primário</td><td>Escritas já confirmadas que ainda não tinham chegado às réplicas</td></tr>
+      <tr><td>Síncrono</td><td>Gravar o WAL também no disco de uma réplica</td><td>Nenhuma escrita confirmada</td></tr>
+    </tbody>
+  </table>
+
+  <p>Cada escrita do JMeter foi conferida pela sua chave de idempotência: nas 6 quedas de primário medidas, nenhuma escrita confirmada se perdeu. No modo assíncrono, a perda exige que a queda caia nos poucos milissegundos entre a confirmação e o envio do WAL; isso aconteceu num ensaio preliminar, em que uma exclusão confirmada reapareceu no novo primário. No modo síncrono essa perda não é possível.</p>
+
+  <pre class="sql"># Trecho de infra/patroni/patroni.yml
+ttl: 20                          # validade da chave de líder no etcd (s)
+loop_wait: 2                     # o primário renova a chave a cada 2 s
+synchronous_mode: false          # true = commit síncrono com uma réplica
+maximum_lag_on_failover: 1048576 # réplica atrasada mais de 1 MiB não é promovida</pre>
+
+  <p>A troca de dono da chave de líder é uma operação atômica decidida por consenso no etcd, então dois nós nunca se consideram primários ao mesmo tempo. Um nó que volta é reintegrado como réplica; se tinha gravado algo que o novo primário não recebeu, o <code>pg_rewind</code> descarta essa diferença. As APIs não têm dados para sincronizar: uma nova versão é implantada trocando uma réplica de cada vez.</p>
+
+  <h3>5.3 Impacto no desempenho</h3>
+  <p>A tabela reúne as médias das três repetições, sem os 10 s de ramp-up. A coluna DP mostra o desvio-padrão da vazão global entre as repetições. Não houve erros nas 36 rodadas.</p>
+
+  <table>
+    <thead>
+      <tr><th>Configuração</th><th class="center">Cen.</th><th class="num">Vazão<br>(req/s)</th><th class="num">DP</th><th class="num">P95 leitura<br>(ms)</th><th class="num">P95 escrita<br>(ms)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Sem replicação (T1)</td><td class="center">A</td><td class="num">1.292,5</td><td class="num">109,0</td><td class="num">112,7</td><td class="num">104,3</td></tr>
+      <tr><td>Sem replicação (T1)</td><td class="center">B</td><td class="num">1.162,2</td><td class="num">111,1</td><td class="num">119,3</td><td class="num">112,0</td></tr>
+      <tr><td>Sem replicação (T1)</td><td class="center">C</td><td class="num">1.449,0</td><td class="num">66,9</td><td class="num">100,0</td><td class="num">94,7</td></tr>
+      <tr><td>Replicação assíncrona</td><td class="center">A</td><td class="num">1.415,2</td><td class="num">200,3</td><td class="num">159,7</td><td class="num">162,2</td></tr>
+      <tr><td>Replicação assíncrona</td><td class="center">B</td><td class="num">1.367,5</td><td class="num">311,1</td><td class="num">156,3</td><td class="num">161,0</td></tr>
+      <tr><td>Replicação assíncrona</td><td class="center">C</td><td class="num">1.618,1</td><td class="num">326,7</td><td class="num">146,7</td><td class="num">146,7</td></tr>
+      <tr><td>Replicação síncrona</td><td class="center">A</td><td class="num">1.342,9</td><td class="num">255,6</td><td class="num">163,0</td><td class="num">169,3</td></tr>
+      <tr><td>Replicação síncrona</td><td class="center">B</td><td class="num">1.345,1</td><td class="num">286,1</td><td class="num">164,3</td><td class="num">173,3</td></tr>
+      <tr><td>Replicação síncrona</td><td class="center">C</td><td class="num">1.388,2</td><td class="num">296,0</td><td class="num">163,7</td><td class="num">168,3</td></tr>
+      <tr><td>Assíncrona + leitura nas réplicas</td><td class="center">A</td><td class="num">1.410,0</td><td class="num">212,9</td><td class="num">140,0</td><td class="num">166,7</td></tr>
+      <tr><td>Assíncrona + leitura nas réplicas</td><td class="center">B</td><td class="num">1.426,3</td><td class="num">240,1</td><td class="num">196,7</td><td class="num">93,7</td></tr>
+      <tr><td>Assíncrona + leitura nas réplicas</td><td class="center">C</td><td class="num">1.510,7</td><td class="num">338,5</td><td class="num">74,7</td><td class="num">209,3</td></tr>
+    </tbody>
+  </table>
+
+  <figure>
+    <img src="figuras/vazao_por_configuracao.png" alt="Vazão por configuração">
+    <figcaption>Figura 3 — Vazão global média; as barras de erro representam o desvio-padrão de três repetições.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>Replicação assíncrona × T1:</strong> a vazão média foi de 9,5% a 17,7% maior, mas dentro da variação entre repetições; os três processos da API compensam o trabalho extra das réplicas. A latência piorou de forma consistente: o P95 subiu de 31% a 55%, porque cada requisição passa duas vezes a mais pelo HAProxy e mais processos disputam a mesma máquina.</li>
+    <li><strong>Replicação síncrona × assíncrona:</strong> o custo cresce com a proporção de escritas: o P95 de escrita aumentou 4,4% no cenário A, 7,7% no B e 14,8% no C, onde a vazão caiu 14,2%. Com primário e réplicas na mesma máquina, esse é o menor custo possível; numa rede real, cada commit esperaria também a ida e volta até a réplica.</li>
+    <li><strong>Leitura nas réplicas:</strong> no cenário B, tirar as leituras do primário acelerou as escritas (P95 de escrita −41,8%); no C, as leituras ficaram mais rápidas (P95 de leitura −49,1%). Como todos os nós dividem a mesma máquina, o efeito não foi consistente e a vazão não mudou de forma significativa. Em troca, uma leitura numa réplica pode não enxergar uma escrita confirmada milissegundos antes.</li>
+  </ul>
+
+  <h2>6. Servidores stateful e stateless (pergunta c)</h2>
+
+  <table>
+    <thead><tr><th>Componente</th><th>Tipo</th><th>O que guarda</th><th>Consequência observada</th></tr></thead>
+    <tbody>
+      <tr><td>API</td><td>Stateless</td><td>Nada entre requisições</td><td>Recuperação apenas por roteamento: fora do balanceamento em 0,5 s, sem nenhum erro</td></tr>
+      <tr><td>HAProxy</td><td>Stateless</td><td>Só a configuração e as conexões abertas</td><td>Fácil de duplicar, mas foi mantido único neste trabalho</td></tr>
+      <tr><td>PostgreSQL</td><td>Stateful</td><td>Os dados</td><td>Exige replicação, eleição e reintegração: cerca de 22 s sem escritas na queda do primário</td></tr>
+      <tr><td>etcd</td><td>Stateful</td><td>Qual nó é o primário</td><td>Exige consenso entre 3 membros</td></tr>
+    </tbody>
+  </table>
+
+  <p>Como as APIs não guardam estado, qualquer réplica pode atender qualquer requisição, inclusive a repetição de uma requisição que outra réplica começou; por isso a chave de idempotência fica no banco, e não na memória da API. Tolerar a queda de uma API exigiu apenas detectar a falha e redirecionar o tráfego. Já o banco concentrou toda a complexidade: manter as cópias atualizadas, decidir com segurança quem é o primário, reintegrar o nó que volta e escolher entre confirmar rápido (assíncrono) ou não perder dados (síncrono). É também onde ficou a única indisponibilidade relevante. Manter a aplicação sem estado e concentrar o estado num banco replicado foi o que tornou a solução viável.</p>
+
+  <h2>7. Impacto da escolha do banco: SQL e NoSQL (pergunta d)</h2>
+
+  <table>
+    <thead><tr><th>Critério</th><th>SQL — PostgreSQL (usado)</th><th>NoSQL — exemplos: MongoDB e Cassandra</th></tr></thead>
+    <tbody>
+      <tr><td>Quem aceita escritas</td><td>Somente o primário</td><td>MongoDB: somente o primário; Cassandra: qualquer réplica</td></tr>
+      <tr><td>Troca de primário</td><td>Não é embutida: exigiu Patroni, etcd e HAProxy; 22 s sem escrita</td><td>MongoDB: eleição embutida, em geral concluída em até 12 s; Cassandra: não há primário a trocar</td></tr>
+      <tr><td>Atualização das réplicas</td><td>Log físico (WAL), assíncrono ou síncrono</td><td>MongoDB: log de operações, com confirmação pela maioria (<code>w: majority</code>); Cassandra: escrita em várias réplicas com quórum configurável</td></tr>
+      <tr><td>Repetição de escritas</td><td>Implementada na API (chave de idempotência)</td><td>MongoDB: os drivers repetem as escritas automaticamente</td></tr>
+      <tr><td>Consistência</td><td>Forte no primário; réplicas podem estar atrasadas</td><td>MongoDB: semelhante; Cassandra: eventual, ou forte com quóruns de leitura e escrita</td></tr>
+      <tr><td>Integridade</td><td>Chaves, <code>CHECK</code>, <code>UNIQUE</code> e transações ACID em qualquer nó que vire primário</td><td>Mais responsabilidade da aplicação; transações mais limitadas</td></tr>
+    </tbody>
+  </table>
+
+  <p>Com o PostgreSQL, a alta disponibilidade teve de ser montada por fora, com três componentes adicionais e mudanças na API. Em troca, há consistência forte, integridade declarada no banco — a idempotência do <code>POST</code> usa uma restrição <code>UNIQUE</code> — e nenhuma perda de dados no modo síncrono, ao custo de cerca de 22 s sem escritas a cada queda não planejada do primário. O MongoDB traria a eleição e a repetição de escritas prontas, com indisponibilidade parecida. O Cassandra continuaria aceitando escritas durante a queda de um nó, em troca de consistência eventual e menos garantias de integridade. Para o esquema estável e o volume deste sistema, o PostgreSQL continua adequado; um banco sem primário só se justificaria se as escritas não pudessem parar nem por alguns segundos.</p>
+
+  <h2>8. Limitações da avaliação</h2>
+  <ul>
+    <li>Todos os servidores rodaram na mesma máquina: as réplicas disputaram CPU, memória e disco com o primário e com o JMeter, e não houve latência de rede real entre eles.</li>
+    <li>As falhas foram simuladas com <code>docker kill</code>. Falhas de rede, de disco ou de máquina inteira e falhas simultâneas de dois servidores não foram ensaiadas.</li>
+    <li>O HAProxy continuou sendo um ponto único de falha. Em produção, ele seria duplicado com um endereço IP compartilhado ou substituído pelo balanceador de um provedor de nuvem.</li>
+    <li>Três repetições por condição; a vazão variou bastante entre repetições, então diferenças pequenas entre configurações não são conclusivas.</li>
+    <li>A indisponibilidade de escrita medida depende diretamente do prazo de 20 s da chave de líder.</li>
+  </ul>
+
+  <h2>9. Conclusão</h2>
+  <div class="conclusion">
+    <p>A replicação eliminou os pontos únicos de falha do servidor web e do banco de dados. Sem replicação, a queda de qualquer um dos dois servidores deixou a aplicação cerca de 61 s fora do ar, até o processo ser religado. Com três APIs atrás do HAProxy, a queda de uma delas não gerou nenhum erro para os clientes. Com o PostgreSQL replicado, as leituras continuaram durante a queda do primário e as escritas voltaram sozinhas depois de cerca de 22 s, sem perda de escritas confirmadas nas rodadas medidas.</p>
+    <p>Foram usadas três réplicas da API, três nós do PostgreSQL (um primário e duas réplicas) e três membros do etcd. As réplicas do banco são atualizadas pelo envio contínuo do log (WAL) do primário. O modo síncrono garante que nenhuma escrita confirmada se perca, a um custo que cresce com a proporção de escritas (P95 de escrita até 14,8% maior no cenário C). A topologia replicada aumentou a latência em relação ao T1 (P95 de 31% a 55% maior), sem reduzir a vazão.</p>
+    <p>A diferença entre servidores sem estado e com estado apareceu nos resultados: a camada web se recuperou em menos de 1 s apenas redirecionando o tráfego, enquanto o banco precisou de eleição e de um prazo de segurança de 20 s. Com o PostgreSQL, a alta disponibilidade exigiu componentes externos e mudanças na API, em troca de consistência forte e integridade declarada no banco. Para o esquema e o volume deste sistema, essa troca é adequada.</p>
+  </div>
+</body>
+</html>

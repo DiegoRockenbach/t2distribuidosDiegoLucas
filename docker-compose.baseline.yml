@@ -1,0 +1,81 @@
+# Topologia de referencia, igual a do Trabalho 1: uma API e um PostgreSQL, sem
+# replicacao. Usa a mesma imagem da API e a mesma versao do PostgreSQL da
+# topologia replicada, para que a comparacao isole o efeito da replicacao.
+#
+# Uso: docker compose -f docker-compose.baseline.yml up -d --build
+# (as duas topologias publicam a porta 3000; rode uma de cada vez)
+name: t2-baseline
+
+services:
+  postgres:
+    image: postgres:16.14-bookworm
+    hostname: postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-air_quality}
+      POSTGRES_USER: ${POSTGRES_USER:-air_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_local_password}
+    volumes:
+      - baseline_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    networks: [airnet]
+
+  api:
+    build:
+      context: ./api
+    image: t2-air-quality/api:latest
+    hostname: api
+    init: true
+    environment: &baseline-api-env
+      NODE_ENV: production
+      PORT: 3000
+      INSTANCE_ID: api
+      DATABASE_URL: postgresql://${POSTGRES_USER:-air_user}:${POSTGRES_PASSWORD:-change_this_local_password}@postgres:5432/${POSTGRES_DB:-air_quality}
+      READ_ROUTING: primary
+      # Mesmo total de conexoes com o banco da topologia replicada (3 x 5).
+      DB_POOL_MIN: ${DB_POOL_MIN:-2}
+      DB_POOL_MAX: ${BASELINE_DB_POOL_MAX:-15}
+      DB_IDLE_TIMEOUT_MS: ${DB_IDLE_TIMEOUT_MS:-30000}
+      DB_CONNECTION_TIMEOUT_MS: ${DB_CONNECTION_TIMEOUT_MS:-3000}
+      DB_QUERY_TIMEOUT_MS: ${DB_QUERY_TIMEOUT_MS:-10000}
+      DB_RETRY_BUDGET_MS: ${DB_RETRY_BUDGET_MS:-2500}
+      SHUTDOWN_GRACE_MS: 0
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+      LOG_LEVEL: ${LOG_LEVEL:-warn}
+    ports:
+      - "${API_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+    networks: [airnet]
+
+  tools:
+    image: t2-air-quality/api:latest
+    profiles: ["tools"]
+    environment:
+      <<: *baseline-api-env
+      INSTANCE_ID: tools
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["npm", "run", "db:migrate:prod"]
+    networks: [airnet]
+
+volumes:
+  baseline_pg_data:
+
+networks:
+  airnet:
+    driver: bridge

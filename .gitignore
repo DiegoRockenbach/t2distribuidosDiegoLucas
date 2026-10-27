@@ -1,0 +1,12 @@
+.env
+.tools/
+.venv/
+api/node_modules/
+api/dist/
+coverage/
+resultados/*
+!resultados/.gitkeep
+__pycache__/
+*.log
+*.jtl
+.DS_Store

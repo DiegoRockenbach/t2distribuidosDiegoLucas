@@ -1,0 +1,243 @@
+# Topologia replicada do Trabalho 2.
+#
+#   clientes -> HAProxy :3000 -> api1 | api2 | api3  (camada web sem estado)
+#                                   |
+#                HAProxy :5000 -> primario  ---- streaming de WAL ---->  replicas
+#                HAProxy :5001 -> replicas      (pg1, pg2, pg3 com Patroni)
+#                                   |
+#                           etcd1, etcd2, etcd3  (eleicao do lider via Raft)
+#
+# Uso: docker compose up -d --build   (detalhes no README.md)
+name: t2-air-quality
+
+x-etcd: &etcd
+  image: quay.io/coreos/etcd:v3.5.34
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "/usr/local/bin/etcdctl", "endpoint", "health"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+
+x-etcd-env: &etcd-env
+  ETCD_INITIAL_CLUSTER: etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+  ETCD_INITIAL_CLUSTER_STATE: new
+  ETCD_INITIAL_CLUSTER_TOKEN: air-quality-etcd
+  ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+  ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+  ETCD_DATA_DIR: /etcd-data
+
+x-patroni: &patroni
+  build:
+    context: ./infra/patroni
+  image: t2-air-quality/patroni:16-4.1.5
+  restart: unless-stopped
+  depends_on: [etcd1, etcd2, etcd3]
+  stop_grace_period: 30s
+  # Os nos do banco so precisam resolver nomes internos da rede do Compose.
+  # Sem esta linha, o DNS do Docker Desktop repassa nomes desconhecidos (como o
+  # de um no que acabou de cair) ao resolvedor do Windows, e a falha leva ~5 s.
+  # Durante esse tempo o PostgreSQL nao conclui a promocao da nova primaria.
+  dns: [127.0.0.1]
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8008/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+    start_period: 30s
+
+x-patroni-env: &patroni-env
+  PATRONI_SUPERUSER_PASSWORD: ${PG_SUPERUSER_PASSWORD:-change_this_superuser_password}
+  PATRONI_REPLICATION_PASSWORD: ${PG_REPLICATION_PASSWORD:-change_this_replication_password}
+  PATRONI_REWIND_PASSWORD: ${PG_REWIND_PASSWORD:-change_this_rewind_password}
+  APP_DB_NAME: ${POSTGRES_DB:-air_quality}
+  APP_DB_USER: ${POSTGRES_USER:-air_user}
+  APP_DB_PASSWORD: ${POSTGRES_PASSWORD:-change_this_local_password}
+
+x-api: &api
+  build:
+    context: ./api
+  image: t2-air-quality/api:latest
+  restart: unless-stopped
+  init: true
+  depends_on: [haproxy]
+  stop_grace_period: 15s
+  healthcheck:
+    test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+    start_period: 5s
+
+x-api-env: &api-env
+  NODE_ENV: production
+  PORT: 3000
+  # Escritas: porta 5000 do HAProxy, sempre o primario eleito pelo Patroni.
+  DATABASE_URL: postgresql://${POSTGRES_USER:-air_user}:${POSTGRES_PASSWORD:-change_this_local_password}@haproxy:5000/${POSTGRES_DB:-air_quality}
+  # Leituras: porta 5001, replicas. Usada quando READ_ROUTING=replicas ou como
+  # alternativa quando o primario esta indisponivel.
+  DATABASE_READ_URL: postgresql://${POSTGRES_USER:-air_user}:${POSTGRES_PASSWORD:-change_this_local_password}@haproxy:5001/${POSTGRES_DB:-air_quality}
+  READ_ROUTING: ${READ_ROUTING:-primary}
+  DB_POOL_MIN: ${DB_POOL_MIN:-1}
+  DB_POOL_MAX: ${DB_POOL_MAX:-5}
+  DB_IDLE_TIMEOUT_MS: ${DB_IDLE_TIMEOUT_MS:-30000}
+  DB_CONNECTION_TIMEOUT_MS: ${DB_CONNECTION_TIMEOUT_MS:-3000}
+  DB_QUERY_TIMEOUT_MS: ${DB_QUERY_TIMEOUT_MS:-10000}
+  DB_RETRY_BUDGET_MS: ${DB_RETRY_BUDGET_MS:-2500}
+  SHUTDOWN_GRACE_MS: ${SHUTDOWN_GRACE_MS:-3000}
+  CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+  LOG_LEVEL: ${LOG_LEVEL:-warn}
+
+services:
+  etcd1:
+    <<: *etcd
+    environment:
+      <<: *etcd-env
+      ETCD_NAME: etcd1
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd1:2379
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd1:2380
+    volumes: [etcd1_data:/etcd-data]
+    networks:
+      airnet: { ipv4_address: 10.77.0.11 }
+
+  etcd2:
+    <<: *etcd
+    environment:
+      <<: *etcd-env
+      ETCD_NAME: etcd2
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd2:2379
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd2:2380
+    volumes: [etcd2_data:/etcd-data]
+    networks:
+      airnet: { ipv4_address: 10.77.0.12 }
+
+  etcd3:
+    <<: *etcd
+    environment:
+      <<: *etcd-env
+      ETCD_NAME: etcd3
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd3:2379
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd3:2380
+    volumes: [etcd3_data:/etcd-data]
+    networks:
+      airnet: { ipv4_address: 10.77.0.13 }
+
+  pg1:
+    <<: *patroni
+    hostname: pg1
+    environment:
+      <<: *patroni-env
+      PATRONI_NAME: pg1
+    ports: ["${PATRONI_PG1_PORT:-8008}:8008"]
+    volumes: [pg1_data:/var/lib/postgresql/data]
+    networks:
+      airnet: { ipv4_address: 10.77.0.21 }
+
+  pg2:
+    <<: *patroni
+    hostname: pg2
+    environment:
+      <<: *patroni-env
+      PATRONI_NAME: pg2
+    ports: ["${PATRONI_PG2_PORT:-8009}:8008"]
+    volumes: [pg2_data:/var/lib/postgresql/data]
+    networks:
+      airnet: { ipv4_address: 10.77.0.22 }
+
+  pg3:
+    <<: *patroni
+    hostname: pg3
+    environment:
+      <<: *patroni-env
+      PATRONI_NAME: pg3
+    ports: ["${PATRONI_PG3_PORT:-8010}:8008"]
+    volumes: [pg3_data:/var/lib/postgresql/data]
+    networks:
+      airnet: { ipv4_address: 10.77.0.23 }
+
+  haproxy:
+    image: haproxy:3.2.22-alpine
+    restart: unless-stopped
+    volumes:
+      - ./infra/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "${API_PORT:-3000}:3000"
+      - "${HAPROXY_STATS_PORT:-8404}:8404"
+      - "${DB_PRIMARY_PORT:-5000}:5000"
+      - "${DB_REPLICAS_PORT:-5001}:5001"
+    networks:
+      airnet: { ipv4_address: 10.77.0.30 }
+
+  api1:
+    <<: *api
+    hostname: api1
+    environment:
+      <<: *api-env
+      INSTANCE_ID: api1
+    networks:
+      airnet: { ipv4_address: 10.77.0.41 }
+
+  api2:
+    <<: *api
+    hostname: api2
+    environment:
+      <<: *api-env
+      INSTANCE_ID: api2
+    networks:
+      airnet: { ipv4_address: 10.77.0.42 }
+
+  api3:
+    <<: *api
+    hostname: api3
+    environment:
+      <<: *api-env
+      INSTANCE_ID: api3
+    networks:
+      airnet: { ipv4_address: 10.77.0.43 }
+
+  frontend:
+    build:
+      context: ./frontend
+    image: t2-air-quality/frontend:latest
+    restart: unless-stopped
+    depends_on: [haproxy]
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    networks:
+      airnet: { ipv4_address: 10.77.0.50 }
+
+  # Tarefas administrativas (migrations, carga do dataset, indice):
+  #   docker compose run --rm tools npm run db:migrate:prod
+  tools:
+    <<: *api
+    profiles: ["tools"]
+    restart: "no"
+    depends_on: []
+    healthcheck:
+      disable: true
+    environment:
+      <<: *api-env
+      INSTANCE_ID: tools
+      LOG_LEVEL: info
+    command: ["npm", "run", "db:migrate:prod"]
+    networks: [airnet]
+
+volumes:
+  etcd1_data:
+  etcd2_data:
+  etcd3_data:
+  pg1_data:
+  pg2_data:
+  pg3_data:
+
+# Enderecos fixos: um container que reinicia volta com o mesmo IP, como um
+# servidor real. Com IPs dinamicos, nos recriados podiam trocar de endereco entre
+# si e o HAProxy, por alguns segundos, enxergava o no errado como primario.
+# Containers temporarios (servico tools) recebem enderecos da faixa .128-.255.
+networks:
+  airnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.77.0.0/24
+          ip_range: 10.77.0.128/25

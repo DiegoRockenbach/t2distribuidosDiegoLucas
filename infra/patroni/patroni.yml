@@ -1,0 +1,81 @@
+# Configuracao comum aos tres nos (pg1, pg2, pg3). O que muda por no -- nome e
+# enderecos anunciados -- chega por variaveis PATRONI_* (ver entrypoint.sh e
+# docker-compose.yml). Senhas tambem chegam por variaveis de ambiente.
+scope: air-quality
+namespace: /service/
+
+restapi:
+  listen: 0.0.0.0:8008
+
+# Armazenamento de configuracao distribuida (DCS). O etcd usa Raft; com tres
+# membros, o quorum e 2 e o cluster tolera a perda de um deles.
+etcd3:
+  hosts:
+    - etcd1:2379
+    - etcd2:2379
+    - etcd3:2379
+
+log:
+  level: INFO
+
+bootstrap:
+  # Configuracao dinamica: gravada no etcd quando o cluster nasce e compartilhada
+  # por todos os nos. Pode ser alterada depois com `patronictl edit-config`
+  # (os scripts de experimento alternam synchronous_mode assim).
+  dcs:
+    # O lider renova sua chave no etcd a cada loop_wait segundos. Se o lider
+    # morrer, a chave expira apos ttl segundos e as replicas disputam a lideranca.
+    # Regra do Patroni: loop_wait + 2 * retry_timeout <= ttl.
+    ttl: 20
+    loop_wait: 2
+    retry_timeout: 5
+    # Replica atrasada mais que 1 MiB de WAL nao pode ser promovida.
+    maximum_lag_on_failover: 1048576
+    # false = replicacao assincrona; true = uma replica sincrona (RPO zero).
+    synchronous_mode: false
+    # false: sem replica sincrona disponivel, o primario volta a confirmar
+    # sozinho (prioriza disponibilidade). true bloquearia as escritas.
+    synchronous_mode_strict: false
+    synchronous_node_count: 1
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        max_connections: 100
+        wal_level: replica
+        hot_standby: "on"
+        wal_log_hints: "on"
+        max_wal_senders: 10
+        max_replication_slots: 10
+        wal_keep_size: 256MB
+        hot_standby_feedback: "on"
+        synchronous_commit: "on"
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  post_bootstrap: /etc/patroni/post_bootstrap.sh
+
+postgresql:
+  listen: 0.0.0.0:5432
+  data_dir: /var/lib/postgresql/data/pgdata
+  bin_dir: /usr/lib/postgresql/16/bin
+  pgpass: /tmp/pgpass
+  authentication:
+    superuser:
+      username: postgres
+    replication:
+      username: replicator
+    rewind:
+      username: rewinder
+  parameters:
+    unix_socket_directories: /var/run/postgresql
+  pg_hba:
+    - local all all trust
+    - host replication replicator all scram-sha-256
+    - host all all all scram-sha-256
+
+tags:
+  nofailover: false
+  noloadbalance: false
+  clonefrom: false
+  nosync: false

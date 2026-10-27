@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Air Quality Concurrent Workload" enabled="true">
+      <stringProp name="TestPlan.comments">Leitores consultam filtros indexaveis; cada escritor cria (com Idempotency-Key), atualiza e remove o proprio registro. A replica que atendeu cada requisicao fica em served_by.</stringProp>
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Variables">
+        <collectionProp name="Arguments.arguments"/>
+      </elementProp>
+      <stringProp name="TestPlan.user_define_classpath"/>
+    </TestPlan>
+    <hashTree>
+      <ConfigTestElement guiclass="HttpDefaultsGui" testclass="ConfigTestElement" testname="HTTP Defaults" enabled="true">
+        <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments">
+          <collectionProp name="Arguments.arguments"/>
+        </elementProp>
+        <stringProp name="HTTPSampler.domain">${__P(api_host,localhost)}</stringProp>
+        <stringProp name="HTTPSampler.port">${__P(api_port,3000)}</stringProp>
+        <stringProp name="HTTPSampler.protocol">${__P(api_protocol,http)}</stringProp>
+        <stringProp name="HTTPSampler.connect_timeout">${__P(connect_timeout,5000)}</stringProp>
+        <stringProp name="HTTPSampler.response_timeout">${__P(response_timeout,10000)}</stringProp>
+      </ConfigTestElement>
+      <hashTree/>
+      <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="JSON Headers" enabled="true">
+        <collectionProp name="HeaderManager.headers">
+          <elementProp name="" elementType="Header">
+            <stringProp name="Header.name">Accept</stringProp>
+            <stringProp name="Header.value">application/json</stringProp>
+          </elementProp>
+        </collectionProp>
+      </HeaderManager>
+      <hashTree/>
+      <RegexExtractor guiclass="RegexExtractorGui" testclass="RegexExtractor" testname="Capture last response code (client backoff)" enabled="true">
+        <stringProp name="RegexExtractor.useHeaders">code</stringProp>
+        <stringProp name="RegexExtractor.refname">last_code</stringProp>
+        <stringProp name="RegexExtractor.regex">(.+)</stringProp>
+        <stringProp name="RegexExtractor.template">$1$</stringProp>
+        <stringProp name="RegexExtractor.default">200</stringProp>
+        <boolProp name="RegexExtractor.default_empty_value">false</boolProp>
+        <stringProp name="RegexExtractor.match_number">1</stringProp>
+      </RegexExtractor>
+      <hashTree/>
+      <RegexExtractor guiclass="RegexExtractorGui" testclass="RegexExtractor" testname="Capture serving API replica" enabled="true">
+        <stringProp name="RegexExtractor.useHeaders">true</stringProp>
+        <stringProp name="RegexExtractor.refname">served_by</stringProp>
+        <stringProp name="RegexExtractor.regex">(?i)x-served-by:\s*([A-Za-z0-9_.-]+)</stringProp>
+        <stringProp name="RegexExtractor.template">$1$</stringProp>
+        <stringProp name="RegexExtractor.default">none</stringProp>
+        <boolProp name="RegexExtractor.default_empty_value">false</boolProp>
+        <stringProp name="RegexExtractor.match_number">1</stringProp>
+      </RegexExtractor>
+      <hashTree/>
+
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Readers - ${__P(scenario,A)}" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">-1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">${__P(readers,50)}</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">${__P(ramp_up,20)}</stringProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <stringProp name="ThreadGroup.duration">${__P(duration,120)}</stringProp>
+        <stringProp name="ThreadGroup.delay">0</stringProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+      </ThreadGroup>
+      <hashTree>
+        <IfController guiclass="IfControllerPanel" testclass="IfController" testname="READ - backoff after failed sample" enabled="true">
+          <stringProp name="IfController.condition">${__jexl3(!"${last_code}".startsWith("2"))}</stringProp>
+          <boolProp name="IfController.evaluateAll">false</boolProp>
+          <boolProp name="IfController.useExpression">true</boolProp>
+        </IfController>
+        <hashTree>
+          <TestAction guiclass="TestActionGui" testclass="TestAction" testname="READ - client backoff" enabled="true">
+            <intProp name="ActionProcessor.action">1</intProp>
+            <intProp name="ActionProcessor.target">0</intProp>
+            <stringProp name="ActionProcessor.duration">${__P(error_backoff_ms,100)}</stringProp>
+          </TestAction>
+          <hashTree/>
+        </hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="READ - filtered list" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="city" elementType="HTTPArgument"><boolProp name="HTTPArgument.always_encode">true</boolProp><stringProp name="Argument.name">city</stringProp><stringProp name="Argument.value">Porto Alegre</stringProp><stringProp name="Argument.metadata">=</stringProp></elementProp>
+              <elementProp name="pollutant" elementType="HTTPArgument"><boolProp name="HTTPArgument.always_encode">true</boolProp><stringProp name="Argument.name">pollutant</stringProp><stringProp name="Argument.value">PM2.5</stringProp><stringProp name="Argument.metadata">=</stringProp></elementProp>
+              <elementProp name="measured_from" elementType="HTTPArgument"><boolProp name="HTTPArgument.always_encode">true</boolProp><stringProp name="Argument.name">measured_from</stringProp><stringProp name="Argument.value">2025-01-01T00:00:00Z</stringProp><stringProp name="Argument.metadata">=</stringProp></elementProp>
+              <elementProp name="measured_to" elementType="HTTPArgument"><boolProp name="HTTPArgument.always_encode">true</boolProp><stringProp name="Argument.name">measured_to</stringProp><stringProp name="Argument.value">2025-12-31T23:59:59Z</stringProp><stringProp name="Argument.metadata">=</stringProp></elementProp>
+              <elementProp name="page" elementType="HTTPArgument"><boolProp name="HTTPArgument.always_encode">false</boolProp><stringProp name="Argument.name">page</stringProp><stringProp name="Argument.value">1</stringProp><stringProp name="Argument.metadata">=</stringProp></elementProp>
+              <elementProp name="page_size" elementType="HTTPArgument"><boolProp name="HTTPArgument.always_encode">false</boolProp><stringProp name="Argument.name">page_size</stringProp><stringProp name="Argument.value">25</stringProp><stringProp name="Argument.metadata">=</stringProp></elementProp>
+            </collectionProp>
+          </elementProp>
+          <stringProp name="HTTPSampler.path">/api/readings</stringProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="READ status 200" enabled="true">
+            <collectionProp name="Asserion.test_strings"><stringProp name="49586">200</stringProp></collectionProp>
+            <stringProp name="Assertion.custom_message">Leitura deve retornar HTTP 200</stringProp>
+            <stringProp name="Assertion.test_field">Assertion.response_code</stringProp><boolProp name="Assertion.assume_success">false</boolProp><intProp name="Assertion.test_type">8</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="READ has items" enabled="true">
+            <collectionProp name="Asserion.test_strings"><stringProp name="-1179211002">&quot;items&quot;</stringProp></collectionProp>
+            <stringProp name="Assertion.custom_message">Resposta paginada deve conter items</stringProp>
+            <stringProp name="Assertion.test_field">Assertion.response_data</stringProp><boolProp name="Assertion.assume_success">false</boolProp><intProp name="Assertion.test_type">16</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Writers - ${__P(scenario,A)}" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">startnextloop</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller">
+          <boolProp name="LoopController.continue_forever">false</boolProp><stringProp name="LoopController.loops">-1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">${__P(writers,50)}</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">${__P(ramp_up,20)}</stringProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp><stringProp name="ThreadGroup.duration">${__P(duration,120)}</stringProp><stringProp name="ThreadGroup.delay">0</stringProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+      </ThreadGroup>
+      <hashTree>
+        <IfController guiclass="IfControllerPanel" testclass="IfController" testname="WRITE - backoff after failed sample" enabled="true">
+          <stringProp name="IfController.condition">${__jexl3(!"${last_code}".startsWith("2"))}</stringProp>
+          <boolProp name="IfController.evaluateAll">false</boolProp>
+          <boolProp name="IfController.useExpression">true</boolProp>
+        </IfController>
+        <hashTree>
+          <TestAction guiclass="TestActionGui" testclass="TestAction" testname="WRITE - client backoff" enabled="true">
+            <intProp name="ActionProcessor.action">1</intProp>
+            <intProp name="ActionProcessor.target">0</intProp>
+            <stringProp name="ActionProcessor.duration">${__P(error_backoff_ms,100)}</stringProp>
+          </TestAction>
+          <hashTree/>
+        </hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="WRITE - create" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments"><collectionProp name="Arguments.arguments"><elementProp name="" elementType="HTTPArgument"><boolProp name="HTTPArgument.always_encode">false</boolProp><stringProp name="Argument.value">{&quot;stationCode&quot;:&quot;LOAD-${__threadNum}&quot;,&quot;city&quot;:&quot;Porto Alegre&quot;,&quot;pollutant&quot;:&quot;PM2.5&quot;,&quot;measuredAt&quot;:&quot;2025-06-15T12:00:00.000Z&quot;,&quot;measuredValue&quot;:25.5,&quot;unit&quot;:&quot;ug/m3&quot;,&quot;qualityStatus&quot;:&quot;moderate&quot;,&quot;notes&quot;:&quot;JMeter scenario ${__P(scenario,A)}&quot;}</stringProp><stringProp name="Argument.metadata">=</stringProp></elementProp></collectionProp></elementProp>
+          <stringProp name="HTTPSampler.path">/api/readings</stringProp><stringProp name="HTTPSampler.method">POST</stringProp><boolProp name="HTTPSampler.follow_redirects">true</boolProp><boolProp name="HTTPSampler.use_keepalive">true</boolProp><boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="CREATE status 201" enabled="true"><collectionProp name="Asserion.test_strings"><stringProp name="49587">201</stringProp></collectionProp><stringProp name="Assertion.test_field">Assertion.response_code</stringProp><intProp name="Assertion.test_type">8</intProp></ResponseAssertion><hashTree/>
+          <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="Extract own reading ID" enabled="true"><stringProp name="JSONPostProcessor.referenceNames">reading_id</stringProp><stringProp name="JSONPostProcessor.jsonPathExprs">$.id</stringProp><stringProp name="JSONPostProcessor.match_numbers">1</stringProp><stringProp name="JSONPostProcessor.defaultValues">NOT_FOUND</stringProp></JSONPostProcessor><hashTree/>
+          <UserParameters guiclass="UserParametersGui" testclass="UserParameters" testname="CREATE new idempotency key" enabled="true"><collectionProp name="UserParameters.names"><stringProp name="idem_key">idem_key</stringProp></collectionProp><collectionProp name="UserParameters.thread_values"><collectionProp name="user_1"><stringProp name="uuid">${__UUID()}</stringProp></collectionProp></collectionProp><boolProp name="UserParameters.per_iteration">false</boolProp></UserParameters><hashTree/><HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="CREATE JSON Content-Type and Idempotency-Key" enabled="true"><collectionProp name="HeaderManager.headers"><elementProp name="" elementType="Header"><stringProp name="Header.name">Content-Type</stringProp><stringProp name="Header.value">application/json</stringProp></elementProp><elementProp name="" elementType="Header"><stringProp name="Header.name">Idempotency-Key</stringProp><stringProp name="Header.value">${idem_key}</stringProp></elementProp></collectionProp></HeaderManager><hashTree/>
+        </hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="WRITE - update" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments"><collectionProp name="Arguments.arguments"><elementProp name="" elementType="HTTPArgument"><boolProp name="HTTPArgument.always_encode">false</boolProp><stringProp name="Argument.value">{&quot;stationCode&quot;:&quot;LOAD-${__threadNum}&quot;,&quot;city&quot;:&quot;Porto Alegre&quot;,&quot;pollutant&quot;:&quot;PM2.5&quot;,&quot;measuredAt&quot;:&quot;2025-06-15T12:00:00.000Z&quot;,&quot;measuredValue&quot;:31.75,&quot;unit&quot;:&quot;ug/m3&quot;,&quot;qualityStatus&quot;:&quot;moderate&quot;,&quot;notes&quot;:&quot;Updated by writer ${__threadNum}&quot;}</stringProp><stringProp name="Argument.metadata">=</stringProp></elementProp></collectionProp></elementProp>
+          <stringProp name="HTTPSampler.path">/api/readings/${reading_id}</stringProp><stringProp name="HTTPSampler.method">PUT</stringProp><boolProp name="HTTPSampler.follow_redirects">true</boolProp><boolProp name="HTTPSampler.use_keepalive">true</boolProp><boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+        </HTTPSamplerProxy>
+        <hashTree><ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="UPDATE status 200" enabled="true"><collectionProp name="Asserion.test_strings"><stringProp name="49586">200</stringProp></collectionProp><stringProp name="Assertion.test_field">Assertion.response_code</stringProp><intProp name="Assertion.test_type">8</intProp></ResponseAssertion><hashTree/><HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="UPDATE JSON Content-Type" enabled="true"><collectionProp name="HeaderManager.headers"><elementProp name="" elementType="Header"><stringProp name="Header.name">Content-Type</stringProp><stringProp name="Header.value">application/json</stringProp></elementProp></collectionProp></HeaderManager><hashTree/></hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="WRITE - delete" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments"><collectionProp name="Arguments.arguments"><elementProp name="" elementType="HTTPArgument"><boolProp name="HTTPArgument.always_encode">false</boolProp><stringProp name="Argument.value">{}</stringProp><stringProp name="Argument.metadata">=</stringProp></elementProp></collectionProp></elementProp><stringProp name="HTTPSampler.path">/api/readings/${reading_id}</stringProp><stringProp name="HTTPSampler.method">DELETE</stringProp><boolProp name="HTTPSampler.follow_redirects">true</boolProp><boolProp name="HTTPSampler.use_keepalive">true</boolProp><boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+        </HTTPSamplerProxy>
+        <hashTree><ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="DELETE status 204" enabled="true"><collectionProp name="Asserion.test_strings"><stringProp name="49591">204</stringProp></collectionProp><stringProp name="Assertion.test_field">Assertion.response_code</stringProp><intProp name="Assertion.test_type">8</intProp></ResponseAssertion><hashTree/><HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="DELETE JSON Content-Type" enabled="true"><collectionProp name="HeaderManager.headers"><elementProp name="" elementType="Header"><stringProp name="Header.name">Content-Type</stringProp><stringProp name="Header.value">application/json</stringProp></elementProp></collectionProp></HeaderManager><hashTree/></hashTree>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>
